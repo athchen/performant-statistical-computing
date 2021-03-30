@@ -1,8 +1,8 @@
 ---
 title: "Homework: finite precision arithmetic"
+author: Athena Chen
 output: html_notebook
 ---
-
 
 ```{r setup, echo=FALSE}
 rm(list = ls())
@@ -20,14 +20,18 @@ for (pkg in required_packages) {
 source(file.path(path_to_script, "..", "R", "colors.R"))
 ```
 
-
 # Problem 1
 Figure out what the function `determine_precision` is trying to do and fill out the missing line.
 
-```{r}
+<font color="blue"> The `determine_precision` function looks to see at what value two numbers are no longer distinguishable. This value is the **precision**. 
 
+* To identify the precision, we start by an estimate of `1`. 
+* If the numbers `1` and `1 + precision_est` are distinguishable,e.g. `1 != 1 + precision_est`, then the precision is halved. 
+* This process continues until `R` no longer returns that `1 != 1 + precision_est` is true. At this point, the lower bound for the precision (e.g. the next value of precision that would return `FALSE` for `1 != 1 + precision_est`) and the upper bound (e.g. the last value of our precision estimate that returned `TRUE` for `1 != 1 + precision_est`) is returned. </font>
+
+```{r}
 are_numerically_distinguishable <- function(value1, value2) {
-  # Fill in
+  value1 != value2
 }
 
 determine_precision <- function(init_upper_bound = 1) {
@@ -47,12 +51,13 @@ print(sprintf(
   "The precision is between %.3g and %.3g.", 
   prec$lower_bd, prec$upper_bd
 ))
-
 ```
+
 **Remark:** R does not have a native support for single-precision numbers.
 
 
 # Problem 2
+
 The following problem is inspired by Hofert (2020) (https://arxiv.org/abs/2003.08009).
 Draw a large number of random variables uniformly distributed in [0, 1]. 
 In theory, no two random variables take the exact same value.
@@ -70,10 +75,24 @@ est_num_expected_duplicate <- function (n_draw, n_choice) {
 n_unique_double <- 2^53 # Number of unique machine-representable values in [0, 1].
 n_draw <- 10^6
 
-# Fill in
+# Fill in ------
+# First-order approximation for the expected number of duplicates when drawing uniformly with replacement. 
+est_num_expected_duplicate(n_draw, n_unique_double)
 
+# number of duplicates
+set.seed(20210330)
+unif_draws <- runif(n_draw) # Draw from a uniform distribution
+sum(duplicated(unif_draws)) # Total number of duplicates
 ```
 
+<font color="blue"> The expected number of duplicates when drawing uniformly with replacement is less than 1, but the observed number of duplicates is $`r sum(duplicated(unif_draws))`$. Based on the Hofert (2020), 
+
+> Many RNGs produce (pseudo-)random integers in the form of a recursion and such integers
+are then location-scale transformed to (0, 1) and represented as doubles to produce (pseudo-
+)random numbers.
+
+I suspect that the duplicates may result during the location-scale transformations which result in higher density of sampling particular values over others. 
+</font>
 
 # Problem 3
 You have learned in the class that the centered difference $\frac{f(x + \Delta x) - f(x - \Delta x)}{2 \Delta x}$ approximates the derivative $f'(x)$ up to an $O(\Delta x^2)$ error.
@@ -82,18 +101,20 @@ We evaluate its derivative using an analytical formula and compare it to the cen
 Plot the relative error in a log-log scale.
 What do you expect the slope of the plotted line to be?
 
+<font color="blue"> Since the centered difference approximates the derivative up to an $O(\Delta x^2)$ error, I'd expect the slope of the plotted line on the log-log scale to be 2 (of -2 as $\Delta x$ is plotted from large to small values.) </font>
+
 ```{r}
 #' Approximate derivative via centered-difference approximation
 approximate_deriv <- function(func, x, dx) {
-  # Fill in
+  (func(x + dx) - func(x - dx))/(2*dx)
 }
 
 log_logistic_func <- function(x) {
-  # Fill in
+  log(exp(x)/(1 + exp(x)))
 }
 
 log_logistic_deriv <- function(x) {
-  # Fill in
+  1/(1 + exp(x))
 }
 
 # Calculate and plot the relative errors of finite difference approximations
@@ -123,12 +144,37 @@ plot(
 )
 
 ```
+
 Does your output agree with what you expected? 
 Explain the observed phenomenon.
 
+<font color="blue"> The output for stepsizes between $2^{-1}$ to $2^{-15}$ seems to agree with what I expected. But for step sizes smaller than $2^{-15}$, the relative errors increases as the step size decreases. I presume this is due to numerical stability problems for smaller step size values. </font> 
+
 **Bonus question 1:** What is the slope in the "latter part" of your plotted line?
 
+<font color="blue"> Interestingly, the average slope in the latter part of the plotted line seems to be 2. </font>
+
 **Bonus question 2:** Implement a strategy to automatically choose a near-optimal $\Delta x$ for numerically approximating the derivative of a given function via centered difference. (Hint: first get a crude estimate of $f'(x)$ and refine it at the next iteration.)
+
+<font color="blue"> My strategy would be to start at a crude estimate of $f'(x)$, and half $\Delta x$ until the change in $f'(x)$ is below some numerical tolerance. From the code below, we see that the optimal value of $\Delta x$ is where the slope of the relative error starts to change. </font>
+
+```{r}
+determine_delta <- function(func, x, init_dx = 1, tol = 1e-32) {
+  curr_dx <- init_dx
+  divider <- 2 
+  while (abs(approximate_deriv(func, x, curr_dx) -
+             approximate_deriv(func, x, curr_dx/2)) >= tol) {
+    curr_dx <- curr_dx / divider
+  }
+  return(curr_dx)
+}
+
+optimal_delta <- log2(determine_delta(log_logistic_func, x))
+print(paste0(
+  "The optimal value of delta x is 2^", 
+  optimal_delta, "."
+))
+```
 
 
 # Problem 4
