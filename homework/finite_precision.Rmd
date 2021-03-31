@@ -176,7 +176,6 @@ print(paste0(
 ))
 ```
 
-
 # Problem 4
 Many state-of-the-art algorithms for statistical inference rely on the gradient of a likelihood or loss function.
 These algorithms, however, will obviously fail if you supply a wrong gradient.
@@ -195,6 +194,7 @@ n_pred <- InternetAd$x@Dim[2]
 
 ## Part 1
 Use the provided `compute_logit_penalized_loglik` function and try running a gradient-free optimization algorithm from $\beta = (1, 1, ..., 1)$.
+
 ```{r}
 compute_logit_penalized_loglik <- function(
     reg_coef, design_mat, n_success, n_trial=NULL, penalty = 1.
@@ -213,23 +213,46 @@ compute_internet_ad_ploglik <- function(reg_coef) {
   return(compute_logit_penalized_loglik(reg_coef, InternetAd$x, InternetAd$y))
 }
 
-
 optim_result <- optim(
   # Fill in
+  par = rep(1, n_pred), 
+  compute_internet_ad_ploglik, 
+  method = 'Nelder-Mead', # gradient-free algorithm
+  control = list(fnscale = -1) # Maximize the function
+)
+```
+
+Oops, that didn't work --- figure out what went wrong. 
+
+<font color="blue"> The log-likelihood is `-Inf` when $\beta = (1, 1, ..., )$. </font>
+
+After you figured it out, don't worry about fixing it but try starting the optimization from $\beta = (0, 0, ..., 0)$.
+It should at least run now.
+Check `optim_result$convergence` and see if we were successful in finding the penalized MLE this time.
+
+<font color="blue"> The convergence code returned 1, indicating that we had hit the max iteration limit and did not find the penalized MLE. </font>
+
+```{r}
+optim_result <- optim(
+  # Fill in
+  par = rep(0, n_pred), 
+  compute_internet_ad_ploglik, 
   method = 'Nelder-Mead', # gradient-free algorithm
   control = list(fnscale = -1) # Maximize the function
 )
 
+print(paste0("The convergence code is: ", optim_result$convergence))
 ```
 
-Oops, that didn't work --- figure out what went wrong. 
-After you figured it out, don't worry about fixing it but try starting the optimization from $\beta = (0, 0, ..., 0)$.
-It should at least run now.
-Check `optim_result$convergence` and see if we were successful in finding the penalized MLE this time.
 Write a code to call `warning` and let a user know otherwise.
 
 ```{r}
 # Fill in --- let a user know if the algorithm converged or not
+check_convergence <- function(optim_out){
+  if(optim_out$convergence != 0){ warning("optim did not converge.")}
+}
+
+check_convergence(optim_result)
 ```
 
 
@@ -246,7 +269,9 @@ First implement and test a function to numerically differentiate the given real-
 approximate_grad <- function(func, x, dx = 10^-6) {
   numerical_grad <- rep(0, length(x))
   for (i in 1:length(x)) {
-    # Fill in
+    dx_vec <- rep(0, length(x))
+    dx_vec[i] <- dx
+    numerical_grad[i] <- (func(x + dx_vec) - func(x - dx_vec))/(2*dx)
   }
   return(numerical_grad)
 }
@@ -261,12 +286,15 @@ are_all_close <- function(vector1, vector2, rel_tol = 1e-3) {
 # 1) some log-density/log-likelihood function and 2) its gradient. These functions
 # should be simple enough that, if the numerical and analytical gradients do not
 # match, the bug is more likely in `approximate_grad`.
-
+set.seed(20210330)
+test_data <- rbinom(50, 1, 0.25)
+# bernoulli 
 compute_logp <- function(x) {
   # Fill in
+  sum(test_data*log(x) + (1 - test_data)*log(1 - x))
 }
 compute_grad <- function(x) {
-  # Fill in
+  sum(test_data/x - (1 - test_data)/(1 - x))
 }
 
 assert("Finite difference approximation coincides with analytical one", {
@@ -274,13 +302,11 @@ assert("Finite difference approximation coincides with analytical one", {
   grad <- compute_grad(x)
   are_all_close(grad, approx_grad)
 })
-
 ```
 
 Next, implement the gradient of the penalized logistic model and test it using the `approx_grad` function.
 
 ```{r}
-
 compute_logit_grad <- function(
     reg_coef, design_mat, n_success, n_trial=NULL, penalty = 1.
   ) {
@@ -288,6 +314,9 @@ compute_logit_grad <- function(
     n_trial <- rep(1, length(n_success))
   }
   # Fill in
+  logit_prob <- design_mat %*% reg_coef
+  loglik_grad <- t(n_success - n_trial/(1 + exp(-logit_prob))) %*% design_mat
+  
   loglik_grad <- as.vector(loglik_grad)
   penalty_grad <- - penalty * reg_coef
   grad <- loglik_grad + penalty_grad
@@ -305,11 +334,12 @@ assert("Penalized log-likelihood and its gradient are consistent with each other
   grad <- compute_internet_ad_grad(reg_coef)
   are_all_close(grad, approx_grad)
 })
-
 ```
 
 Now that we have implemented and tested the gradient, try a gradient-based optimization algorithm to find the penalized MLE.
 Is the optimization successful this time?
+
+<font color="blue"> Yes, it did :) </font>
 
 ```{r}
 reg_coef <- rep(0., n_pred)
@@ -341,6 +371,13 @@ dx <- 10^-6
 
 profvis({
   # Fill in --- paste in your implementation of `approx_grad`
+  numerical_grad <- rep(0, length(x))
+  for (i in 1:length(x)) {
+    dx_vec <- rep(0, length(x))
+    dx_vec[i] <- dx
+    numerical_grad[i] <- (func(x + dx_vec) - func(x - dx_vec))/(2*dx)
+  }
+  numerical_grad
 })
 ```
 
@@ -349,9 +386,8 @@ You can use the same idea to test the consistency between your calculations of g
 Describe how you would implement such a test (but no need to implement it).
 
 ```{r}
-
-approx_directional_deriv <- function(...) {
-  # Fill in
+approx_directional_deriv <- function(funs, x, v, t = 1e-6) {
+  (funs(x + t*v) - funs(x))/t
 }
 
 set.seed(140850)
@@ -362,6 +398,9 @@ v <- v / sqrt(sum(v^2))
 assertion <- ""
 assert(assertion, {
   approx_dderiv <- approx_directional_deriv(compute_internet_ad_ploglik, reg_coef, v)
-  # Fill in
+  dderiv <- compute_internet_ad_grad(reg_coef) %*% v
+  are_all_close(dderiv, approx_dderiv)
 })
 ```
+
+<font color="blue"> Since the second derivative is just the derivative of the first derivative, we can show that the second directional derivative ie equal to $v' H v$ where $v$ is a unit vector, and $H$ is the hessian matrix. We can then check the consistency of our Hessian using the second directional derivative (rather than coordinate-wise approximations). </font>
