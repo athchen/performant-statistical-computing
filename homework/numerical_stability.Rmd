@@ -1,5 +1,6 @@
 ---
 title: 'Homework: numerical linear algebra and stability issues'
+author: Athena Chen
 output: html_notebook
 ---
 
@@ -24,14 +25,26 @@ Execute a command `git grep -n "sq_exp_cov <- function"` from the root directory
 Paste the output below.
 
 ```{zsh, eval=FALSE}
-# Paste the `git grep` output.
+homework/numerical_stability.Rmd:24:Execute a command `git grep -n "sq_exp_cov <- function"` from the root directory of the git repository.
+lecture/finite_prec_and_numerical_stability.Rmd:276:sq_exp_cov <- function(dist, range) {
+lecture/finite_prec_and_numerical_stability.Rmd:303:sq_exp_cov <- function(dist, range) {
 ```
 
 The grep output tells you where you can find the (failed) kriging / Gaussian process regression example in the lecture source file.
 Copy the synthetic observation from there (the one defined on the range $[0, 0.4]$ and $[0.6, 1.0]$).
 
 ```{r}
-# Fill in
+sq_exp_cov <- function(dist, range) {
+  return(exp(-(dist / range)^2))
+}
+
+loc_obs <- c(seq(0, .4, .01), seq(.6, 1, .01))
+n_obs <- length(loc_obs)
+
+set.seed(2021)
+corr_range <- .2
+dist_obs <- as.matrix(dist(loc_obs))
+Sigma_obs <- sq_exp_cov(dist_obs, corr_range)
 y_obs <- mvrnorm(mu = rep(0, n_obs), Sigma = Sigma_obs)
 ```
 
@@ -41,15 +54,62 @@ We can ignore the components with negligible ($\approx 0$) variance in computing
 In other words, we approximate $\boldsymbol{\Sigma}_{\textrm{obs}}^{-1}$ with $\sum_{i = 1}^k \lambda_i^{-1} \boldsymbol{u}_i \boldsymbol{u}_i^\intercal$ in computing $\boldsymbol{\Sigma}_{\textrm{obs}}^{-1} \boldsymbol{y}_{\textrm{obs}}$ for a suitably chosen number of principal components $k$.
 Choose $k$ to capture $99.99$\% of variance in $\boldsymbol{y}_{\textrm{obs}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{\Sigma}_{\textrm{obs}})$.
 
+<font color="blue"> Below, I write a function to use the eigen-decomposition technique to approximate the inverse of a given matrix. Here, threshold is the minimum proportion of variance we want to capture. </font>
+
 ```{r}
+# Function to use the eigen-decomposition technique to approximate the matrix inverse. 
+eigen_decomp_est <- function(sigma, threshold){
+  eigen_decomp <- eigen(Sigma_obs) 
+  eigen_vec <- eigen_decomp$vectors 
+  eigen_val <- eigen_decomp$values
+  
+  perc_var <- cumsum(eigen_val^2/(sum(eigen_val^2)))
+  num_pcs <- min(which(perc_var > threshold))
+  
+  sigma_inv <- Reduce('+', lapply(1:num_pcs, function(i) {
+    (eigen_val[i]^-1*(eigen_vec[, i] %*% t(eigen_vec[, i])))
+    }))
+  
+  list(num_pcs = num_pcs, 
+       perc_var = perc_var, 
+       threshold = threshold, 
+       eigen_decom = eigen_decomp, 
+       sigma_inv = sigma_inv)
+}
+```
+
+<font color="blue"> For a more accurate approximation, I chose $k$ to capture $99.99\%$ of the variance. In this case, we use 8 principal components ($k = 7$). </font>
+
+```{r}
+# Eigen decomposition
+Sigma_obs_ed <- eigen_decomp_est(Sigma_obs, 1 - 1e-5)
+Sigma_obs_ed$num_pcs
+
+# Predict values
 loc_new <- seq(.41, .59, .01)
-# Compute the conditional mean of GP on the new locations.
+n_new <- length(loc_new)
+
+# Set mean vectors
+mean_new <- rep(0, n_new)
+mean_obs <- rep(0, n_obs)
+
+# Set variance matrix for new observations
+dist_new <- as.matrix(dist(loc_new))
+Sigma_new <- sq_exp_cov(dist_new, corr_range)
+
+# Define covariance matrix between the new and the old matrices
+cross_dist  <-  as.matrix(dist(c(loc_new,  loc_obs))) 
+cross_dist  <-  cross_dist[1:n_new, (n_new + 1):(n_new + n_obs)]
+Sigma_cross  <-  sq_exp_cov(cross_dist,  corr_range)
+
+# Predicted values for the new observations
+y_pred <- mean_new + Sigma_cross %*% (Sigma_obs_ed$sigma_inv %*% (y_obs - mean_obs))
 ```
 
 ```{r, fig.dim=c(8, 5), fig.align='center'}
 solid_circle_index <- 19
 plot(
-  # Fill in
+  loc_obs, y_obs, 
   xlab="s", ylab="y(s)", 
   pch=solid_circle_index,
   cex.lab=1.4, cex.axis=1.4, 
@@ -57,16 +117,46 @@ plot(
   frame.plot = F
 )
 points(
-  # Fil in
+  loc_new, y_pred,
   col = jhu_color$spiritBlue
 )
 ```
 
 ## Part 2: Quantifying uncertainty in interpolation
+
 Use the eigen-decomposition technique to compute the conditional covariance 
 $$\textrm{Var}(\boldsymbol{y}_1 \, | \, \boldsymbol{y}_2)
   = \boldsymbol{\Sigma}_{11} - \boldsymbol{\Sigma}_{12} \boldsymbol{\Sigma}_{22}^{-1} \boldsymbol{\Sigma}_{21},$$
 calculate 95% CI intervals of the interpolation, and plot them.
+
+```{r, fig.dim=c(8, 5), fig.align='center'}
+var_pred <- Sigma_new - Sigma_cross %*% Sigma_obs_ed$sigma_inv %*% t(Sigma_cross)
+
+ci_lower <- y_pred - 1.96*sqrt(diag(var_pred))
+ci_upper <- y_pred + 1.96*sqrt(diag(var_pred))
+
+# Plot
+plot(
+  loc_obs, y_obs, 
+  xlab="s", ylab="y(s)", 
+  pch=solid_circle_index,
+  cex.lab=1.4, cex.axis=1.4, 
+  col=jhu_color$heritageBlue, 
+  frame.plot = F
+)
+polygon(
+  c(rev(loc_new), loc_new), 
+  c(rev(ci_lower), ci_upper), 
+  col = 'grey90',
+  border = NA
+)
+lines(loc_new, ci_lower, col = jhu_color$spiritBlue)
+lines(loc_new, ci_upper, col = jhu_color$spiritBlue)
+points(
+  loc_new, y_pred,
+  col = jhu_color$spiritBlue
+)
+```
 
 ## Part 3: Kriging based on an alternative GP covariance function
 
