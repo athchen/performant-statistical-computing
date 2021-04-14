@@ -152,10 +152,7 @@ polygon(
 )
 lines(loc_new, ci_lower, col = jhu_color$spiritBlue)
 lines(loc_new, ci_upper, col = jhu_color$spiritBlue)
-points(
-  loc_new, y_pred,
-  col = jhu_color$spiritBlue
-)
+points(loc_new, y_pred, col = jhu_color$spiritBlue)
 ```
 
 ## Part 3: Kriging based on an alternative GP covariance function
@@ -168,15 +165,74 @@ First find the definition and implementation of a Matern covariance using a comm
 
 ```{r}
 # Definition of the `matern_cov` function.
+matern_cov <- function(dist, range) {
+  scaled_dist <- dist / range
+  return(
+    (1 + sqrt(5) * scaled_dist + 5 / 3 * scaled_dist^2)
+    * exp(- sqrt(5) * scaled_dist)
+  )
+}
 ```
 
 Then use the eigen decomposition technique as before for interpolation and uncertainty quantification.
-Afterward, check the condition number of $\boldsymbol{\Sigma}_{\textrm{obs}}$ and see if you can directly compute $\boldsymbol{\Sigma}_{\textrm{obs}}^{-1} \boldsymbol{y}_{\textrm{obs}}$ using the `solve` function.
-Do we get the same answer as the one based on eigen decomposition?
 
 ```{r}
-# Fill in
+# Change Sigma_obs and y_obs
+Sigma_obs <- matern_cov(dist_obs, corr_range)
+y_obs <- mvrnorm(mu = mean_obs, Sigma = Sigma_obs)
+
+# Eigen decomposition
+Sigma_obs_ed <- eigen_decomp_est(Sigma_obs, 1 - 1e-5)
+Sigma_obs_ed$num_pcs
+
+# Predict values
+Sigma_new <- matern_cov(dist_new, corr_range)
+Sigma_cross  <-  matern_cov(cross_dist,  corr_range)
+y_pred <- mean_new + Sigma_cross %*% (Sigma_obs_ed$sigma_inv %*% (y_obs - mean_obs))
+
+# confidence interval
+var_pred <- Sigma_new - Sigma_cross %*% Sigma_obs_ed$sigma_inv %*% t(Sigma_cross)
+ci_lower <- y_pred - 1.96*sqrt(diag(var_pred))
+ci_upper <- y_pred + 1.96*sqrt(diag(var_pred))
 ```
+
+Afterward, check the condition number of $\boldsymbol{\Sigma}_{\textrm{obs}}$ and see if you can directly compute $\boldsymbol{\Sigma}_{\textrm{obs}}^{-1} \boldsymbol{y}_{\textrm{obs}}$ using the `solve` function.
+
+<font color = "blue> Note that the condition number of $\boldsymbol{\Sigma}_{\textrm{obs}}$ is less than $10^16$ so we can directly compute the inverse using the solve function. 
+
+```{r}
+kappa(Sigma_obs) < 1e16
+
+y_pred_solve <- mean_new + Sigma_cross %*% solve(Sigma_obs, y_obs - mean_obs)
+var_pred_solve <-  Sigma_new - Sigma_cross %*% solve(Sigma_obs) %*% t(Sigma_cross)
+ci_lower_solve <- y_pred_solve - 1.96*sqrt(diag(var_pred_solve))
+ci_upper_solve <- y_pred_solve + 1.96*sqrt(diag(var_pred_solve))
+```
+
+Do we get the same answer as the one based on eigen decomposition?
+
+<font color="blue"> I've plotted the interpolated values derived using eigen decomposition in blue, and the values derived using the `solve` function in maroon. The point estimates are similar between the two approaches. However, the 95\% confidence bands for the interpolation using the `solve` function is narrower than the confidence bands derived using eigen decomposition. </font>
+
+```{r, fig.dim=c(8, 5), fig.align='center'}
+# Plot
+plot(
+  loc_obs, y_obs, 
+  xlab="s", ylab="y(s)", 
+  pch=solid_circle_index,
+  cex.lab=1.4, cex.axis=1.4, 
+  col=jhu_color$heritageBlue, 
+  frame.plot = F, 
+  ylim = c(-3, 2)
+)
+lines(loc_new, ci_lower, col = jhu_color$spiritBlue)
+lines(loc_new, ci_upper, col = jhu_color$spiritBlue)
+points(loc_new, y_pred, col = jhu_color$spiritBlue)
+lines(loc_new, ci_lower_solve, col = jhu_color$maroon)
+lines(loc_new, ci_upper_solve, col = jhu_color$maroon)
+points(loc_new, y_pred_solve, col = jhu_color$maroon)
+```
+
+
 
 **Bonus question:** Symmetric positive-definite matrices can be inverted more quickly via the _Cholesky decomposition_ $\boldsymbol{L} \boldsymbol{L}^\intercal = \boldsymbol{A}$ than via the LU or QR decomposition. 
 <!-- The LU decomposition takes $O(2 n^3 / 3)$, QR $O(4 n^3 / 3)$, and Cholesky $O(n^3 / 3)$ operations. -->
