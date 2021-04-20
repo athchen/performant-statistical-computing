@@ -1,11 +1,12 @@
 ---
 title: 'Homework: iterative method'
+author: Athena Chen
 output: html_notebook
 ---
 
 ```{r setup, include = FALSE}
 source(file.path("..", "R", "util.R"))
-required_packages <- c('RSpectra')
+required_packages <- c('RSpectra', 'testit')
 install_and_load_packages(required_packages)
 ```
 
@@ -38,23 +39,62 @@ auto_corr <- .9 # Corresponds to `\phi` above
 ar_precision_matvec <- function(v, auto_corr) {
   # Fill in: note that you can vectorize the calculation and do *not* need a for-loop. 
   # (Hint: how would you efficiently carry out a matrix-vector operation if the matrix has non-zero entries only along the sub or super diagonal?)
+  n <- length(v)
+  
+  # pre-allocate vector
+  v_out <- numeric(n)
+  
+  # Calculate first term
+  v_out[1] <- v[1] - auto_corr * v[2]
+  
+  # Calculate middle terms
+  v_mat <- cbind(v[1:(n-2)], v[2:(n-1)], v[3:n])
+  v_out[2:(n-1)] <- v_mat %*% c(-auto_corr, 1 + auto_corr^2, -auto_corr)
+  
+  # Calculate last term
+  v_out[n] <- -auto_corr * v[(n-1)] + v[n]
+  
+  # Adjust by constant
+  v_out/(1 - auto_corr^2)
 }
 
 ar_eig <- eigs_sym(
   ar_precision_matvec, args = auto_corr,
   # Fill in
+  k = 10, 
+  which = "SM",
   opts = list(
     ncv = 100, # Spectrum distribution of AR-1 process is not very spread out on the extreme ends and is actually a hard case for Lanczos. So it helps to have more Lanczos vectors than the default for faster convergence.
     maxitr = 10^3, # Cap it just in case
     retvec = TRUE # More efficient to do without eigenvectors when not needed
   ),
+  n = ar_length
 )
 ```
 
 Now, directly compute the eigen decomposition of $\boldsymbol{\Sigma}$ (not $\boldsymbol{\Sigma}^{-1}$) and compare its output with the principal components and associated variances found via Lancsoz algorithm.
 
+<font color="blue"> It can be shown that for a stationary lag-1 AR process, 
+
+$$ Cov(X_t, X_s) = \phi^{|s - t|} $$
+
+Note that `ar_eig` contains the 10 smallest eigenvalues of $\Sigma^{-1}$ which are equal to the inverse of the ten largest eigenvalues of $\Sigma$. To show that the associated variances between the two algorithms are similar, it is sufficient to show that the eigenvalues are similar. Additionally, the eigen vectors may differ by the sign, so in the comparison we only look at the absolute value of the eigen vectors. In some cases, the eigen vectors derived the Lancos algorithm were fairly different from those derived directly. 
+</font>
+
 ```{r}
-# Fill in
+Sigma <- sapply(1:ar_length, function(x) auto_corr^abs(x - 1:ar_length))
+Sigma_ed <- eigen(Sigma)
+
+lancos_eigen_val <- sort(1/ar_eig$values, decreasing = TRUE)
+lancos_eigen_vec <- ar_eig$vectors[, order(1/ar_eig$values, decreasing = TRUE)]
+
+# Check that that the two are similar
+assert(paste0("The eigen decomposition obtained via the Lancsoz algorithm, ", 
+              "is consistent with the result obtained directly."), {
+                are_all_close(lancos_eigen_val, Sigma_ed$values[1:10])
+                are_all_close(abs(lancos_eigen_vec), abs(Sigma_ed$vectors[, 1:10]), 
+                              rel_tol = 5e-2)
+})
 ```
 
 **Remark:** 
