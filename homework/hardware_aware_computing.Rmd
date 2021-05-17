@@ -1,12 +1,13 @@
 ---
 title: 'Homework: hardware aware computing'
+author: Athena Chen
 output:
   html_document:
     df_print: paged
 ---
 
 ```{r setup, echo=FALSE}
-required_packages <- c('Rcpp', 'RSpectra', 'testit')
+required_packages <- c('Rcpp', 'RSpectra', 'testit', 'bench')
 for (pkg in required_packages) {
   if (!(pkg %in% rownames(installed.packages()))) {
     install.packages(pkg)
@@ -60,15 +61,28 @@ ar_precision_matvec_R <- function(v, auto_corr) {
 
 ```{r}
 # Check the output of your Rcpp function `ar_precision_matvec`
+v <- rnorm(ar_length)
+
+output_C <- ar_precision_matvec(v, auto_corr)
+output_R <- ar_precision_matvec_R(v, auto_corr) 
+
+assert("Rcpp function should return the same output as the R function", {
+  are_all_close(output_C, output_R)
+})
 ```
 
 Benchmark performance of the R and Rcpp implementations of `ar_precision_matvec`.
 Then use the Rcpp implementation to find the top 10 principal components of $\boldsymbol{\Sigma}$ via Lanczos algorithm.
 How much faster is it compared to explicit eigen decomposition of $\boldsymbol{\Sigma}$?
 
+<font color="blue"> For matrix-vector multiplication, the version implemented in Rcpp tends to be about 8- to 10-fold faster. </font> 
+
 ```{r}
-# Comare performences of the R and Rcpp implementation
+# Compare performences of the R and Rcpp implementation
+bench::mark(ar_precision_matvec_R(v, auto_corr))
+bench::mark(ar_precision_matvec(v, auto_corr))
 ```
+<font color="blue"> The Rcpp implementation that finds the top 10 principal components via Lanczos algorithm is significantly faster than the algorithm that explicitly calculates the eigen decomposition of $\boldsymbol{\Sigma}$. The Rcpp implementation is around 30 times faster than the explicit eigen decomposition approach. </font>
 
 ```{r, eval=FALSE}
 # Use your Rcpp implementation and compute the principal components
@@ -84,6 +98,20 @@ system.time(
     ),
   )
 )
+
+# Output, printed for convenience since `eigen` takes a while 
+#    user  system elapsed 
+#   4.245   0.545   5.095 
+
+# Explicit eigen decomposition
+Sigma <- sapply(1:ar_length, function(x) auto_corr^abs(x - 1:ar_length))
+system.time(
+  eigen(Sigma)
+)
+
+# Output, printed for convenience since `eigen` takes a while 
+#    user  system elapsed 
+# 154.629   1.862 162.031 
 ```
 
 **Bonus Problem:** A symmetric '$k$-banded' matrices of size $n \times n$ can be efficiently stored in a $n \times (k + 1)$ matrix with no loss of information; see [Wikipedia page on banded matrices](https://en.wikipedia.org/wiki/Band_matrix#Band_storage).
@@ -91,6 +119,22 @@ Complete the implementation of `sym_banded_matvec` in the `structured_matvec.cpp
 How does the `sym_banded_matvec` performance compare with `ar_precision_matvec`?
 What aspects of hardware designs might be contributing to the relative performance?
 
+<font color="blue"> Interestingly, the symmetric banded matrix implementation perfoms slightly slower than `ar_precision_matvec`. I suspect that this is because `sym_banded_matvec` is designed to accept a general, more memory efficient storage approach for banded matrices. However, in the specific case of an AR1 process, the efficient storage still takes more memory than necessary as the dignoal and off-diagonal entries are are repeated. Since there are fewer required values to do the calculation with `ar_precision_matvec`, there are probably fewer cache misses. </font>
+
+```{r}
+banded_mat <- cbind(c(1, rep((1 + auto_corr^2), ar_length - 2), 1), 
+                    c(rep(-auto_corr, ar_length -1), 0))
+banded_mat <- banded_mat/(1 - auto_corr^2)
+
+assert("The banded implementation returns the same output as the full matrix implementation.", {
+  output_full <- ar_precision_matvec(v, auto_corr)
+  output_banded <- sym_banded_matvec(v, banded_mat)
+  are_all_close(output_full, output_banded)
+})
+
+bench::mark(sym_banded_matvec(v, banded_mat))
+bench::mark(ar_precision_matvec(v, auto_corr)) 
+```
 
 # Problem 2: Multiplying two matrices ain't quite what you learned in your linear algebra class
 
