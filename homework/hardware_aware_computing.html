@@ -1665,12 +1665,12 @@ bench::mark(ar_precision_matvec_R(v, auto_corr))</code></pre>
 <pre><code># A tibble: 1 x 6
   expression                             min median `itr/sec` mem_alloc `gc/sec`
   &lt;bch:expr&gt;                          &lt;bch:&gt; &lt;bch:&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
-1 ar_precision_matvec_R(v, auto_corr) 84.5µs  176µs     5278.     289KB     35.2</code></pre>
+1 ar_precision_matvec_R(v, auto_corr) 85.9µs  203µs     3956.     289KB     27.9</code></pre>
 <pre class="r"><code>bench::mark(ar_precision_matvec(v, auto_corr))</code></pre>
 <pre><code># A tibble: 1 x 6
   expression                            min  median `itr/sec` mem_alloc `gc/sec`
   &lt;bch:expr&gt;                        &lt;bch:t&gt; &lt;bch:t&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
-1 ar_precision_matvec(v, auto_corr)  8.38µs  22.8µs    40100.    39.7KB     36.1</code></pre>
+1 ar_precision_matvec(v, auto_corr)  9.31µs  32.7µs    18063.    39.7KB     16.0</code></pre>
 <p><font color="blue"> The Rcpp implementation that finds the top 10 principal components via Lanczos algorithm is significantly faster than the algorithm that explicitly calculates the eigen decomposition of <span class="math inline">\(\boldsymbol{\Sigma}\)</span>. The Rcpp implementation is around 30 times faster than the explicit eigen decomposition approach. </font></p>
 <pre class="r"><code># Use your Rcpp implementation and compute the principal components
 system.time(
@@ -1715,12 +1715,12 @@ bench::mark(sym_banded_matvec(v, banded_mat))</code></pre>
 <pre><code># A tibble: 1 x 6
   expression                            min  median `itr/sec` mem_alloc `gc/sec`
   &lt;bch:expr&gt;                       &lt;bch:tm&gt; &lt;bch:t&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
-1 sym_banded_matvec(v, banded_mat)   11.9µs  26.5µs    34174.    38.7KB     30.8</code></pre>
+1 sym_banded_matvec(v, banded_mat)   11.9µs  28.2µs    25229.    38.7KB     20.3</code></pre>
 <pre class="r"><code>bench::mark(ar_precision_matvec(v, auto_corr)) </code></pre>
 <pre><code># A tibble: 1 x 6
   expression                            min  median `itr/sec` mem_alloc `gc/sec`
   &lt;bch:expr&gt;                        &lt;bch:t&gt; &lt;bch:t&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
-1 ar_precision_matvec(v, auto_corr)  8.52µs  23.5µs    36999.    34.5KB     29.6</code></pre>
+1 ar_precision_matvec(v, auto_corr)  8.35µs  25.2µs    28087.    34.5KB     25.3</code></pre>
 </div>
 <div id="problem-2-multiplying-two-matrices-aint-quite-what-you-learned-in-your-linear-algebra-class" class="section level1">
 <h1>Problem 2: Multiplying two matrices ain’t quite what you learned in your linear algebra class</h1>
@@ -1735,14 +1735,46 @@ n_inner &lt;- 1024L
 n_col &lt;- 256L
 A &lt;- matrix(rnorm(n_row * n_inner), nrow = n_row, ncol = n_inner)
 B &lt;- matrix(rnorm(n_inner * n_col), nrow = n_inner, ncol = n_col)</code></pre>
-<pre class="r"><code># Check the output of `row_col_dot_matmat`</code></pre>
+<pre class="r"><code># Check the output of `row_col_dot_matmat`
+assert(&quot;`row_col_dot_matmat` returns the same as the R implementation&quot;, {
+  AB_R &lt;- A %*% B
+  AB_C &lt;- row_col_dot_matmat(A, B)
+  are_all_close(AB_R, AB_C)
+})</code></pre>
 </div>
 <div id="part-ii-going-one-step-beyond-your-linear-algebra-class" class="section level2">
 <h2>Part II: Going one step beyond your linear algebra class</h2>
 <p>We now consider an alternative approach to matrix-matrix multiplications, noting that we can think of a matrix product <span class="math inline">\(\boldsymbol{A} \cdot \boldsymbol{B}\)</span> as each column of <span class="math inline">\(\boldsymbol{B}\)</span> multiplied by <span class="math inline">\(\boldsymbol{A}\)</span>: <span class="math display">\[\boldsymbol{A} \cdot \boldsymbol{B} = \big[ \, \boldsymbol{A} \boldsymbol{b}_1 \, | \, \ldots \, | \, \boldsymbol{A} \boldsymbol{b}_m \, \big].\]</span> Recalling from lecture that “column-oriented” matrix-vector multiplication is more efficient than “row-oriented” one for R matrices, implement <code>col_oriented_matmat</code> (in <code>matmat.cpp</code>) that loops through each column of <span class="math inline">\(\boldsymbol{B}\)</span> applying the column-oriented matrix-vector multiplication. Then compare performances of <code>row_col_dot_matmat</code> and <code>col_oriented_matmat</code> (but only after you test your column-oriented implementation, for heaven’s sake!). Which one is faster and why?</p>
-<pre class="r"><code># Check and benchmark</code></pre>
+<p><font color="blue"> The column-oriented implementation is faster. Because R stores arrays in column major order, the address of the elements are closer, and there are fewer cache misses. Consequently, less time is spent fetching data from higher level caches. </font></p>
+<pre class="r"><code># Check the output of `col_oriented_matmat`
+assert(&quot;`col_oriented_matmat` returns the same as the R implementation&quot;, {
+  AB_R &lt;- A %*% B
+  AB_C &lt;- col_oriented_matmat(A, B)
+  are_all_close(AB_R, AB_C)
+})
+
+# Compare the performance
+bench::mark(row_col_dot_matmat(A, B))</code></pre>
+<pre><code># A tibble: 1 x 6
+  expression                    min   median `itr/sec` mem_alloc `gc/sec`
+  &lt;bch:expr&gt;               &lt;bch:tm&gt; &lt;bch:tm&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
+1 row_col_dot_matmat(A, B)    654ms    654ms      1.53    1.01MB        0</code></pre>
+<pre class="r"><code>bench::mark(col_oriented_matmat(A, B))</code></pre>
+<pre><code># A tibble: 1 x 6
+  expression                     min   median `itr/sec` mem_alloc `gc/sec`
+  &lt;bch:expr&gt;                &lt;bch:tm&gt; &lt;bch:tm&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
+1 col_oriented_matmat(A, B)     99ms    101ms      9.79    1.01MB        0</code></pre>
 <p>Also compare with performance of the matrix-matrix multiplication via <code>%*%</code> in R, which uses whatever the BLAS library your R was configured with. (You can find out which BLAS library R is using via <code>sessionInfo()</code> or <code>extSoftVersion()</code>.)</p>
-<pre class="r"><code># Fill in</code></pre>
+<p><font color="blue"> Interestingly, the R implementation is faster than the column-oriented implementation the row and column matrix multiplication in Rcpp. </font></p>
+<pre class="r"><code># Fill in
+bench::mark(A %*% B)</code></pre>
+<pre><code># A tibble: 1 x 6
+  expression      min   median `itr/sec` mem_alloc `gc/sec`
+  &lt;bch:expr&gt; &lt;bch:tm&gt; &lt;bch:tm&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
+1 A %*% B      84.7ms    120ms      8.11       1MB        0</code></pre>
+<pre class="r"><code>extSoftVersion()[&quot;BLAS&quot;]</code></pre>
+<pre><code>                                                                       BLAS 
+&quot;/Library/Frameworks/R.framework/Versions/4.0/Resources/lib/libRblas.dylib&quot; </code></pre>
 <p>When benchmarking alternative implementations (or alternative algorithms, more generally), keep in mind that the relative performance depends significantly on the size of a test problem. It is important, therefore, to benchmark your implementation/algorithm on problems of realistic size. See the benchmark results of linear algebra libraries from <a href="https://eigen.tuxfamily.org/index.php?title=Benchmark">the Eigen development team</a> and the results under “Gcbd benchmark” in <a href="https://github.com/andre-wojtowicz/blas-benchmarks">this github repository</a>, for example.</p>
 </div>
 <div id="part-iii-doing-it-the-right-way" class="section level2">
@@ -1750,7 +1782,21 @@ B &lt;- matrix(rnorm(n_inner * n_col), nrow = n_inner, ncol = n_col)</code></pre
 <p>Part I &amp; II were simply designed to <del>torture you</del> illustrate how much an algorithm’s performance depends on whether or not it respects an underlying representation of data. Neither of the approaches we’ve discussed, however, is the most effective way to multiply two matrices on modern hardware. Dedicated linear algebra libraries typically deploy <em>blocking</em>, dividing the matrices <span class="math inline">\(\boldsymbol{A}\)</span> and <span class="math inline">\(\boldsymbol{B}\)</span> into sub-matrices of appropriate size and carrying out multiplications block-wise. This approach is designed to minimize the data motion between CPU and RAM by re-using the same pieces of data as much as possible once they travel all the way from RAM to L1 cache.</p>
 <p>In practice, we of course shouldn’t try to implement (let alone optimize) an operation ourselves when there already are efficient existing software libraries. (But, if you are interested in learning more about how the optimized matrix multiplication works, Sec 1.5.4. of Golub and Van Loan (2013) is a good place to start. Also, I found nice lecture slides on this topic <a href="https://cs.brown.edu/courses/cs033/lecture/18cacheX.pdf">here</a>.) The <code>matmat_via_eigen</code> function provided in <code>matmat_eigen.cpp</code> calls the matrix-matrix multiplication from <a href="https://eigen.tuxfamily.org/">Eigen</a>, a C++ linear algebra library, through RcppEigen.</p>
 <pre class="r"><code>sourceCpp(file.path(&#39;src&#39;, &#39;matmat_eigen.cpp&#39;))</code></pre>
-<pre class="r"><code># Check and benchmark</code></pre>
+<p><font color="blue"> Indeed, <code>matmat_via_eigen</code> is faster than all other implementations benchmarked above. </font></p>
+<pre class="r"><code># Check and benchmark
+# Check the output of `col_oriented_matmat`
+assert(&quot;`matmat_via_eigen` returns the same as the R implementation&quot;, {
+  AB_R &lt;- A %*% B
+  AB_C &lt;- matmat_via_eigen(A, B)
+  are_all_close(AB_R, AB_C)
+})
+
+# Compare the performance
+bench::mark(matmat_via_eigen(A, B))</code></pre>
+<pre><code># A tibble: 1 x 6
+  expression                  min   median `itr/sec` mem_alloc `gc/sec`
+  &lt;bch:expr&gt;             &lt;bch:tm&gt; &lt;bch:tm&gt;     &lt;dbl&gt; &lt;bch:byt&gt;    &lt;dbl&gt;
+1 matmat_via_eigen(A, B)   20.2ms   22.7ms      28.4    1.01MB        0</code></pre>
 </div>
 </div>
 

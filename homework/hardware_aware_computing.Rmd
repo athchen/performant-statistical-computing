@@ -163,6 +163,11 @@ B <- matrix(rnorm(n_inner * n_col), nrow = n_inner, ncol = n_col)
 
 ```{r}
 # Check the output of `row_col_dot_matmat`
+assert("`row_col_dot_matmat` returns the same as the R implementation", {
+  AB_R <- A %*% B
+  AB_C <- row_col_dot_matmat(A, B)
+  are_all_close(AB_R, AB_C)
+})
 ```
 
 ## Part II: Going one step beyond your linear algebra class
@@ -173,15 +178,30 @@ Recalling from lecture that "column-oriented" matrix-vector multiplication is mo
 Then compare performances of `row_col_dot_matmat` and `col_oriented_matmat` (but only after you test your column-oriented implementation, for heaven's sake!).
 Which one is faster and why?
 
+<font color="blue"> The column-oriented implementation is faster. Because R stores arrays in column major order, the address of the elements are closer, and there are fewer cache misses. Consequently, less time is spent fetching data from higher level caches. </font>
+
 ```{r}
-# Check and benchmark
+# Check the output of `col_oriented_matmat`
+assert("`col_oriented_matmat` returns the same as the R implementation", {
+  AB_R <- A %*% B
+  AB_C <- col_oriented_matmat(A, B)
+  are_all_close(AB_R, AB_C)
+})
+
+# Compare the performance
+bench::mark(row_col_dot_matmat(A, B))
+bench::mark(col_oriented_matmat(A, B))
 ```
 
 Also compare with performance of the matrix-matrix multiplication via `%*%` in R, which uses whatever the BLAS library your R was configured with.
 (You can find out which BLAS library R is using via `sessionInfo()` or `extSoftVersion()`.) 
 
+<font color="blue"> Interestingly, the R implementation is faster than the column-oriented implementation the row and column matrix multiplication in Rcpp. </font>
+
 ```{r}
 # Fill in
+bench::mark(A %*% B)
+extSoftVersion()["BLAS"]
 ```
 
 When benchmarking alternative implementations (or alternative algorithms, more generally), keep in mind that the relative performance depends significantly on the size of a test problem.
@@ -204,6 +224,17 @@ The `matmat_via_eigen` function provided in `matmat_eigen.cpp` calls the matrix-
 sourceCpp(file.path('src', 'matmat_eigen.cpp'))
 ```
 
+<font color="blue"> Indeed, `matmat_via_eigen` is faster than all other implementations benchmarked above. </font>
+
 ```{r}
 # Check and benchmark
+# Check the output of `col_oriented_matmat`
+assert("`matmat_via_eigen` returns the same as the R implementation", {
+  AB_R <- A %*% B
+  AB_C <- matmat_via_eigen(A, B)
+  are_all_close(AB_R, AB_C)
+})
+
+# Compare the performance
+bench::mark(matmat_via_eigen(A, B))
 ```
